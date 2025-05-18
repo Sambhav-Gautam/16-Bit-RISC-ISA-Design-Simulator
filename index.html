@@ -59,7 +59,7 @@
     <div class="absolute inset-0 gradient-bg opacity-20 z-0"></div>
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 w-full max-w-5xl relative z-10 transition-colors duration-300">
         <div class="flex justify-between items-center mb-6">
-            <hNum1 class="text-3xl font-bold text-gray-800 dark:text-gray-100">Assembly Simulator</hNum1>
+            <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-100">Assembly Simulator</h1>
             <button id="theme-toggle" class="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition">
                 <svg id="theme-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -68,7 +68,7 @@
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div>
-                <hNum2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3">Enter Your Assembly Code</hNum2>
+                <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3">Enter Your Assembly Code</h2>
                 <textarea id="assemblyInput" class="w-full h-80 p-4 border rounded-lg font-mono text-base text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 resize-none transition-colors" placeholder="e.g., var x\nmov R0 $10\nst R0 x\nld R1 x\nhlt"></textarea>
                 <div class="flex space-x-3 mt-4">
                     <button onclick="loadSampleCode()" class="bg-purple-500 text-white px-5 py-2 rounded-lg text-lg font-semibold hover:bg-purple-600 hover:scale-105 transition transform flex items-center">
@@ -86,9 +86,9 @@
                 </div>
             </div>
             <div>
-                <hNum2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3">Assembled Output</hNum2>
+                <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3">Assembled Output</h2>
                 <pre id="assemblerOutput" class="w-full h-36 p-4 border rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-mono text-base crt-effect overflow-auto transition-colors"></pre>
-                <hNum2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3 mt-4">Simulation Output</hNum2>
+                <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3 mt-4">Simulation Output</h2>
                 <pre id="simulatorOutput" class="w-full h-36 p-4 border rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-mono text-base crt-effect overflow-auto transition-colors"></pre>
             </div>
         </div>
@@ -96,9 +96,10 @@
     </div>
 
     <script>
-        let pyodide;
+        let pyodide = null;
         let assemblerOutput = [];
         let simulatorOutput = [];
+        let pyodideReady = false;
 
         // Theme Toggle
         const themeToggle = document.getElementById('theme-toggle');
@@ -125,17 +126,30 @@
             setTheme(currentTheme);
         });
 
-        // Load Pyodide
+        // Load Pyodide and Initialize sys.stdout
         async function loadPyodideAndRun() {
-            pyodide = await loadPyodide();
-            await pyodide.loadPackage("micropip");
-            const micropip = pyodide.pyimport("micropip");
-            await micropip.install("typing_extensions");
+            try {
+                pyodide = await loadPyodide();
+                await pyodide.loadPackage("micropip");
+                const micropip = pyodide.pyimport("micropip");
+                await micropip.install("typing_extensions");
+                await pyodide.runPythonAsync(`
+import sys
+import io
+sys.stdout = io.StringIO()
+                `);
+                pyodideReady = true;
+                console.log("Pyodide initialized");
+            } catch (e) {
+                console.error("Failed to initialize Pyodide:", e);
+                document.getElementById("assemblerOutput").textContent = `Error: Failed to initialize Pyodide: ${e.message}`;
+            }
         }
 
         // Sample Code
         function loadSampleCode() {
-            document.getElementById("assemblyInput").value = `var x\nmov R0 $10\nst R0 x\nld R1 x\nhlt`;
+            const sampleCode = `var x\nmov R0 $10\nst R0 x\nld R1 x\nhlt`.trim();
+            document.getElementById("assemblyInput").value = sampleCode;
             document.getElementById("assemblerOutput").textContent = "";
             document.getElementById("simulatorOutput").textContent = "";
         }
@@ -143,9 +157,10 @@
         // Assembler Code
         const assemblerCode = `
 from typing import Dict, List, Optional
+import re
 
 REGISTER_OPCODES = {
-    "R0": "000", "R1": "001", "R2": "010", "R3": "011",
+    "R0": "000", "R1": "001", "R2": "010 HANDLER MOVED TO LINE 500
     "R4": "100", "R5": "101", "R6": "110", "FLAGS": "111"
 }
 INSTRUCTION_TYPES = {
@@ -202,8 +217,12 @@ class Assembler:
         except ValueError:
             return False
 
-    def get_register_opcode(self, reg: str) -> Optional[str]:
-        return REGISTER_OPCODES.get(reg)
+    def get_register_opcode(self, reg: str, line_no: int) -> Optional[str]:
+        reg = reg.upper()
+        opcode = REGISTER_OPCODES.get(reg)
+        if not opcode:
+            print(f"Debug: Invalid register '{reg}' at line {line_no}")
+        return opcode
 
     def validate_label(self, label: str) -> bool:
         return label in self.labels and label not in self.variables
@@ -211,73 +230,73 @@ class Assembler:
     def validate_variable(self, var: str) -> bool:
         return var in self.variables
 
-    def process_type_a(self, inst: str, opcode: str, params: int) -> str:
-        parts = inst.split()
+    def process_type_a(self, inst: str, opcode: str, params: int, line_no: int) -> str:
+        parts = re.split(r'\\s+', inst.strip(), maxsplit=3)
         if len(parts) != params + 1:
-            raise AssemblerError(f"Instruction must have {params} parameters")
-        reg1 = self.get_register_opcode(parts[1])
-        reg2 = self.get_register_opcode(parts[2])
-        reg3 = self.get_register_opcode(parts[3])
+            raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
+        reg1 = self.get_register_opcode(parts[1], line_no)
+        reg2 = self.get_register_opcode(parts[2], line_no)
+        reg3 = self.get_register_opcode(parts[3], line_no)
         if not all([reg1, reg2, reg3]):
-            raise AssemblerError("Invalid register name")
+            raise AssemblerError(f"Invalid register name in '{inst}' at line {line_no}")
         return opcode + reg1 + reg2 + reg3
 
-    def process_type_b(self, inst: str, opcode: str, params: int) -> str:
-        parts = inst.split()
+    def process_type_b(self, inst: str, opcode: str, params: int, line_no: int) -> str:
+        parts = re.split(r'\\s+', inst.strip(), maxsplit=2)
         if len(parts) != params + 1:
-            raise AssemblerError(f"Instruction must have {params} parameters")
-        reg = self.get_register_opcode(parts[1])
+            raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
+        reg = self.get_register_opcode(parts[1], line_no)
         if not reg:
-            raise AssemblerError("Invalid register name")
+            raise AssemblerError(f"Invalid register name '{parts[1]}' in '{inst}' at line {line_no}")
         if not self.validate_immediate(parts[2]):
-            raise AssemblerError("Invalid immediate value")
+            raise AssemblerError(f"Invalid immediate value '{parts[2]}' at line {line_no}")
         imm = self.decimal_to_binary(int(parts[2][1:]), 7)
         return opcode + reg + imm
 
-    def process_type_b_float(self, inst: str, opcode: str, params: int) -> str:
-        parts = inst.split()
+    def process_type_b_float(self, inst: str, opcode: str, params: int, line_no: int) -> str:
+        parts = re.split(r'\\s+', inst.strip(), maxsplit=2)
         if len(parts) != params + 1:
-            raise AssemblerError(f"Instruction must have {params} parameters")
-        reg = self.get_register_opcode(parts[1])
+            raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
+        reg = self.get_register_opcode(parts[1], line_no)
         if not reg:
-            raise AssemblerError("Invalid register name")
+            raise AssemblerError(f"Invalid register name '{parts[1]}' in '{inst}' at line {line_no}")
         try:
             float_val = float(parts[2][1:])
             imm = self.reverse_floating_pt(float_val)
             if not imm:
-                raise AssemblerError("Invalid floating-point value")
+                raise AssemblerError(f"Invalid floating-point value '{parts[2]}' at line {line_no}")
             return opcode + reg + imm
         except ValueError:
-            raise AssemblerError("Invalid floating-point format")
+            raise AssemblerError(f"Invalid floating-point format '{parts[2]}' at line {line_no}")
 
-    def process_type_c(self, inst: str, opcode: str, params: int) -> str:
-        parts = inst.split()
+    def process_type_c(self, inst: str, opcode: str, params: int, line_no: int) -> str:
+        parts = re.split(r'\\s+', inst.strip(), maxsplit=2)
         if len(parts) != params + 1:
-            raise AssemblerError(f"Instruction must have {params} parameters")
-        reg1 = self.get_register_opcode(parts[1])
-        reg2 = self.get_register_opcode(parts[2])
+            raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
+        reg1 = self.get_register_opcode(parts[1], line_no)
+        reg2 = self.get_register_opcode(parts[2], line_no)
         if not all([reg1, reg2]):
-            raise AssemblerError("Invalid register name")
+            raise AssemblerError(f"Invalid register name in '{inst}' at line {line_no}")
         return opcode + reg1 + reg2
 
-    def process_type_d(self, inst: str, opcode: str, params: int) -> str:
-        parts = inst.split()
+    def process_type_d(self, inst: str, opcode: str, params: int, line_no: int) -> str:
+        parts = re.split(r'\\s+', inst.strip(), maxsplit=2)
         if len(parts) != params + 1:
-            raise AssemblerError(f"Instruction must have {params} parameters")
-        reg = self.get_register_opcode(parts[1])
+            raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
+        reg = self.get_register_opcode(parts[1], line_no)
         if not reg:
-            raise AssemblerError("Invalid register name")
+            raise AssemblerError(f"Invalid register name '{parts[1]}' in '{inst}' at line {line_no}")
         if not self.validate_variable(parts[2]):
-            raise AssemblerError("Undefined variable")
+            raise AssemblerError(f"Undefined variable '{parts[2]}' in '{inst}' at line {line_no}")
         return opcode + reg + self.variables[parts[2]]
 
-    def process_type_e(self, inst: str, opcode: str, params: int) -> str:
-        parts = inst.split()
+    def process_type_e(self, inst: str, opcode: str, params: int, line_no: int) -> str:
+        parts = re.split(r'\\s+', inst.strip(), maxsplit=1)
         if len(parts) != params + 1:
-            raise AssemblerError(f"Instruction must have {params} parameters")
+            raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
         label = parts[1]
         if not self.validate_label(label):
-            raise AssemblerError("Undefined label or variable used as label")
+            raise AssemblerError(f"Undefined label or variable used as label '{label}' at line {line_no}")
         return opcode + self.labels[label]
 
     def floating_pt(self, binary: str) -> float:
@@ -304,61 +323,80 @@ class Assembler:
                 return binary
         return None
 
-    def process_instruction(self, inst: str) -> None:
-        self.line_no += 1
+    def process_instruction(self, inst: str, line_no: int) -> None:
         inst = inst.strip()
         if not inst:
             return
+        print(f"Debug: Processing line {line_no}: '{inst}'")
         label = None
         if ":" in inst:
             label, inst = inst.split(":", 1)
             inst = inst.strip()
             if not inst:
                 return
-        parts = inst.split()
+        inst = re.sub(r'\\s+', ' ', inst)
+        parts = inst.split(maxsplit=3)
+        print(f"Debug: Parsed parts: {parts}")
         if not parts:
-            raise AssemblerError("Empty instruction")
+            raise AssemblerError(f"Empty instruction at line {line_no}")
         opcode = parts[0]
         if opcode == "var":
             if len(parts) != 2:
-                raise AssemblerError("Invalid variable declaration")
-            if self.instructions:
-                raise AssemblerError("Variables must be declared at the beginning")
-            self.variables[parts[1]] = "0" * 7
+                raise AssemblerError(f"Invalid variable declaration at line {line_no}")
             return
+        if opcode == "mov" and len(parts) > 2 and parts[2].startswith("$"):
+            opcode = "mov_imm"
+            print(f"Debug: Treating 'mov {parts[1]} {parts[2]}' as mov_imm (Type B)")
         if opcode not in INSTRUCTION_TYPES:
-            raise AssemblerError("Invalid instruction")
+            raise AssemblerError(f"Invalid instruction '{opcode}' at line {line_no}")
         inst_info = INSTRUCTION_TYPES[opcode]
         inst_type = inst_info["type"]
         inst_opcode = inst_info["opcode"]
         expected_params = inst_info["params"]
         try:
             if inst_type == "A":
-                result = self.process_type_a(inst, inst_opcode, expected_params)
+                result = self.process_type_a(inst, inst_opcode, expected_params, line_no)
             elif inst_type == "B":
                 if opcode == "movf":
-                    result = self.process_type_b_float(inst, inst_opcode, expected_params)
+                    result = self.process_type_b_float(inst, inst_opcode, expected_params, line_no)
                 else:
-                    result = self.process_type_b(inst, inst_opcode, expected_params)
+                    result = self.process_type_b(inst, inst_opcode, expected_params, line_no)
             elif inst_type == "C":
-                result = self.process_type_c(inst, inst_opcode, expected_params)
+                result = self.process_type_c(inst, inst_opcode, expected_params, line_no)
             elif inst_type == "D":
-                result = self.process_type_d(inst, inst_opcode, expected_params)
+                result = self.process_type_d(inst, inst_opcode, expected_params, line_no)
             elif inst_type == "E":
-                result = self.process_type_e(inst, inst_opcode, expected_params)
+                result = self.process_type_e(inst, inst_opcode, expected_params, line_no)
             elif inst_type == "F":
                 result = inst_opcode
             else:
-                raise AssemblerError("Unknown instruction type")
+                raise AssemblerError(f"Unknown instruction type '{inst_type}' at line {line_no}")
             self.output.append(result)
         except AssemblerError as e:
-            self.output.append(f"Error in line {self.line_no}: {str(e)}")
+            self.output.append(f"Error in line {line_no}: {str(e)}")
             raise
 
     def run(self, input_text: str) -> List[str]:
+        input_text = input_text.replace('\\r', '').replace('\\t', ' ')
+        print(f"Debug: Cleaned input: {repr(input_text)}")
         lines = input_text.strip().split("\\n")
-        address = 0
+        seen_non_var = False
         for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("var"):
+                if seen_non_var:
+                    self.output.append("Error: Variables must be declared at the beginning")
+                    return self.output
+            elif ":" in line:
+                seen_non_var = True
+            else:
+                seen_non_var = True
+        address = 0
+        self.instructions = []
+        for line in lines:
+            line = line.strip()
             if not line:
                 continue
             if ":" in line:
@@ -372,19 +410,25 @@ class Assembler:
                 self.instructions.append(line)
                 address += 1
         for line in lines:
+            line = line.strip()
             if line.startswith("var"):
+                if len(line.split()) < 2:
+                    self.output.append(f"Error: Invalid variable declaration")
+                    return self.output
                 var_name = line.split()[1]
                 self.variables[var_name] = self.decimal_to_binary(address, 7)
                 address += 1
         if not lines or not lines[-1].strip().endswith("hlt"):
             self.output.append("Error: Program must end with hlt instruction")
             return self.output
-        for line in lines:
-            self.process_instruction(line)
+        for i, line in enumerate(lines, 1):
+            line = line.strip()
+            if line:
+                self.process_instruction(line, i)
         return self.output
 `;
 
-        // Simulator Code
+        // Simulator Code (unchanged)
         const simulatorCode = `
 from typing import Dict, List, Callable, Optional
 
@@ -700,27 +744,40 @@ class Simulator:
 `;
 
         async function runAssembler() {
-            const input = document.getElementById("assemblyInput").value;
+            const input = document.getElementById("assemblyInput").value.trim();
             const assembleSpinner = document.getElementById("assemble-spinner");
             const assembleText = document.getElementById("assemble-text");
-            if (!input.trim()) {
+            if (!input) {
                 document.getElementById("assemblerOutput").textContent = "Please enter assembly code.";
                 return;
             }
+            if (!pyodideReady || !pyodide) {
+                document.getElementById("assemblerOutput").textContent = "Pyodide is not yet initialized. Please wait a moment and try again.";
+                return;
+            }
+            console.log("Assembling raw input:", JSON.stringify(input));
             assembleSpinner.style.display = "inline-block";
             assembleText.textContent = "Assembling...";
             try {
                 await pyodide.runPythonAsync(`
+import sys
+import io
+sys.stdout = io.StringIO()
+                `);
+                const escapedInput = input.replace(/'/g, "\\'").replace(/\n/g, "\\n");
+                await pyodide.runPythonAsync(`
 ${assemblerCode}
 assembler = Assembler()
 try:
-    result = assembler.run('''${input}''')
+    result = assembler.run('''${escapedInput}''')
     print("\\n".join(result))
 except Exception as e:
     print(str(e))
                 `);
-                assemblerOutput = pyodide.globals.get("sys").stdout.getvalue().split("\n");
-                document.getElementById("assemblerOutput").textContent = assemblerOutput.join("\n");
+                const stdout = pyodide.runPython(`sys.stdout.getvalue()`);
+                console.log("Python debug output:", stdout);
+                assemblerOutput = stdout ? stdout.split("\\n").filter(line => !line.startsWith("Debug:")) : [];
+                document.getElementById("assemblerOutput").textContent = assemblerOutput.join("\\n");
                 document.getElementById("simulatorOutput").textContent = "";
             } catch (e) {
                 document.getElementById("assemblerOutput").textContent = `Error: ${e.message}`;
@@ -733,6 +790,10 @@ except Exception as e:
         async function runSimulator() {
             const simulateSpinner = document.getElementById("simulate-spinner");
             const simulateText = document.getElementById("simulate-text");
+            if (!pyodideReady || !pyodide) {
+                document.getElementById("simulatorOutput").textContent = "Pyodide is not yet initialized. Please wait a moment and try again.";
+                return;
+            }
             if (!assemblerOutput.length || assemblerOutput.some(line => line.startsWith("Error"))) {
                 document.getElementById("simulatorOutput").textContent = "Please assemble valid code first.";
                 return;
@@ -740,6 +801,11 @@ except Exception as e:
             simulateSpinner.style.display = "inline-block";
             simulateText.textContent = "Simulating...";
             try {
+                await pyodide.runPythonAsync(`
+import sys
+import io
+sys.stdout = io.StringIO()
+                `);
                 await pyodide.runPythonAsync(`
 ${simulatorCode}
 simulator = Simulator()
@@ -749,8 +815,9 @@ try:
 except Exception as e:
     print(str(e))
                 `);
-                simulatorOutput = pyodide.globals.get("sys").stdout.getvalue().split("\n");
-                document.getElementById("simulatorOutput").textContent = simulatorOutput.join("\n");
+                const stdout = pyodide.runPython(`sys.stdout.getvalue()`);
+                simulatorOutput = stdout ? stdout.split("\\n") : [];
+                document.getElementById("simulatorOutput").textContent = simulatorOutput.join("\\n");
             } catch (e) {
                 document.getElementById("simulatorOutput").textContent = `Error: ${e.message}`;
             } finally {
