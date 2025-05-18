@@ -6,26 +6,93 @@
     <title>Assembly Simulator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .crt-effect {
+            background: linear-gradient(rgba(18, 16, 16, 0.1), rgba(0, 0, 0, 0.3));
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+            position: relative;
+        }
+        .crt-effect::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+                rgba(255, 255, 255, 0.05) 50%,
+                rgba(255, 255, 255, 0.02) 50%
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+        }
+        .gradient-bg {
+            background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
+            background-size: 400% 400%;
+            animation: gradient 15s ease infinite;
+        }
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .spinner {
+            display: none;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl">
-        <h1 class="text-2xl font-bold text-center mb-4">Assembly Simulator</h1>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<body class="min-h-screen flex items-center justify-center p-6 transition-colors duration-300" id="theme-body">
+    <div class="absolute inset-0 gradient-bg opacity-20 z-0"></div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-8 w-full max-w-5xl relative z-10 transition-colors duration-300">
+        <div class="flex justify-between items-center mb-6">
+            <hNum1 class="text-3xl font-bold text-gray-800 dark:text-gray-100">Assembly Simulator</hNum1>
+            <button id="theme-toggle" class="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+                <svg id="theme-icon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+            </button>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div>
-                <h2 class="text-lg font-semibold mb-2">Assembly Code Input</h2>
-                <textarea id="assemblyInput" class="w-full h-64 p-2 border rounded-md font-mono text-sm" placeholder="Enter your assembly code here..."></textarea>
-                <div class="flex space-x-2 mt-2">
-                    <button onclick="runAssembler()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Assemble</button>
-                    <button onclick="runSimulator()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Simulate</button>
+                <hNum2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3">Enter Your Assembly Code</hNum2>
+                <textarea id="assemblyInput" class="w-full h-80 p-4 border rounded-lg font-mono text-base text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 resize-none transition-colors" placeholder="e.g., var x\nmov R0 $10\nst R0 x\nld R1 x\nhlt"></textarea>
+                <div class="flex space-x-3 mt-4">
+                    <button onclick="loadSampleCode()" class="bg-purple-500 text-white px-5 py-2 rounded-lg text-lg font-semibold hover:bg-purple-600 hover:scale-105 transition transform flex items-center">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Try Sample
+                    </button>
+                    <button onclick="runAssembler()" class="bg-blue-500 text-white px-5 py-2 rounded-lg text-lg font-semibold hover:bg-blue-600 hover:scale-105 transition transform flex items-center">
+                        <span id="assemble-text">Assemble</span>
+                        <div id="assemble-spinner" class="spinner ml-2"></div>
+                    </button>
+                    <button onclick="runSimulator()" class="bg-green-500 text-white px-5 py-2 rounded-lg text-lg font-semibold hover:bg-green-600 hover:scale-105 transition transform flex items-center">
+                        <span id="simulate-text">Simulate</span>
+                        <div id="simulate-spinner" class="spinner ml-2"></div>
+                    </button>
                 </div>
             </div>
             <div>
-                <h2 class="text-lg font-semibold mb-2">Assembled Output</h2>
-                <pre id="assemblerOutput" class="w-full h-32 p-2 border rounded-md bg-gray-50 font-mono text-sm overflow-auto"></pre>
-                <h2 class="text-lg font-semibold mb-2 mt-4">Simulation Output</h2>
-                <pre id="simulatorOutput" class="w-full h-32 p-2 border rounded-md bg-gray-50 font-mono text-sm overflow-auto"></pre>
+                <hNum2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3">Assembled Output</hNum2>
+                <pre id="assemblerOutput" class="w-full h-36 p-4 border rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-mono text-base crt-effect overflow-auto transition-colors"></pre>
+                <hNum2 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-3 mt-4">Simulation Output</hNum2>
+                <pre id="simulatorOutput" class="w-full h-36 p-4 border rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-mono text-base crt-effect overflow-auto transition-colors"></pre>
             </div>
         </div>
+        <p class="text-center text-gray-500 dark:text-gray-400 mt-6 text-base">Built with 💻 by Sambhav Gautam | Powered by Pyodide</p>
     </div>
 
     <script>
@@ -33,6 +100,32 @@
         let assemblerOutput = [];
         let simulatorOutput = [];
 
+        // Theme Toggle
+        const themeToggle = document.getElementById('theme-toggle');
+        const themeIcon = document.getElementById('theme-icon');
+        const body = document.getElementById('theme-body');
+        const setTheme = (theme) => {
+            if (theme === 'dark') {
+                body.classList.add('dark');
+                body.classList.add('bg-gray-900');
+                themeIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />';
+                localStorage.setItem('theme', 'dark');
+            } else {
+                body.classList.remove('dark');
+                body.classList.remove('bg-gray-900');
+                body.classList.add('bg-gray-100');
+                themeIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />';
+                localStorage.setItem('theme', 'light');
+            }
+        };
+        const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        setTheme(savedTheme);
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = localStorage.getItem('theme') === 'dark' ? 'light' : 'dark';
+            setTheme(currentTheme);
+        });
+
+        // Load Pyodide
         async function loadPyodideAndRun() {
             pyodide = await loadPyodide();
             await pyodide.loadPackage("micropip");
@@ -40,7 +133,14 @@
             await micropip.install("typing_extensions");
         }
 
-        // Modified assembler.py without file I/O
+        // Sample Code
+        function loadSampleCode() {
+            document.getElementById("assemblyInput").value = `var x\nmov R0 $10\nst R0 x\nld R1 x\nhlt`;
+            document.getElementById("assemblerOutput").textContent = "";
+            document.getElementById("simulatorOutput").textContent = "";
+        }
+
+        // Assembler Code
         const assemblerCode = `
 from typing import Dict, List, Optional
 
@@ -284,7 +384,7 @@ class Assembler:
         return self.output
 `;
 
-        // Modified simulator.py without file I/O
+        // Simulator Code
         const simulatorCode = `
 from typing import Dict, List, Callable, Optional
 
@@ -601,11 +701,14 @@ class Simulator:
 
         async function runAssembler() {
             const input = document.getElementById("assemblyInput").value;
+            const assembleSpinner = document.getElementById("assemble-spinner");
+            const assembleText = document.getElementById("assemble-text");
             if (!input.trim()) {
                 document.getElementById("assemblerOutput").textContent = "Please enter assembly code.";
                 return;
             }
-
+            assembleSpinner.style.display = "inline-block";
+            assembleText.textContent = "Assembling...";
             try {
                 await pyodide.runPythonAsync(`
 ${assemblerCode}
@@ -621,15 +724,21 @@ except Exception as e:
                 document.getElementById("simulatorOutput").textContent = "";
             } catch (e) {
                 document.getElementById("assemblerOutput").textContent = `Error: ${e.message}`;
+            } finally {
+                assembleSpinner.style.display = "none";
+                assembleText.textContent = "Assemble";
             }
         }
 
         async function runSimulator() {
+            const simulateSpinner = document.getElementById("simulate-spinner");
+            const simulateText = document.getElementById("simulate-text");
             if (!assemblerOutput.length || assemblerOutput.some(line => line.startsWith("Error"))) {
                 document.getElementById("simulatorOutput").textContent = "Please assemble valid code first.";
                 return;
             }
-
+            simulateSpinner.style.display = "inline-block";
+            simulateText.textContent = "Simulating...";
             try {
                 await pyodide.runPythonAsync(`
 ${simulatorCode}
@@ -644,6 +753,9 @@ except Exception as e:
                 document.getElementById("simulatorOutput").textContent = simulatorOutput.join("\n");
             } catch (e) {
                 document.getElementById("simulatorOutput").textContent = `Error: ${e.message}`;
+            } finally {
+                simulateSpinner.style.display = "none";
+                simulateText.textContent = "Simulate";
             }
         }
 
