@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assembly Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-4xl">
+        <h1 class="text-2xl font-bold text-center mb-4">Assembly Simulator</h1>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <h2 class="text-lg font-semibold mb-2">Assembly Code Input</h2>
+                <textarea id="assemblyInput" class="w-full h-64 p-2 border rounded-md font-mono text-sm" placeholder="Enter your assembly code here..."></textarea>
+                <div class="flex space-x-2 mt-2">
+                    <button onclick="runAssembler()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Assemble</button>
+                    <button onclick="runSimulator()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Simulate</button>
+                </div>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold mb-2">Assembled Output</h2>
+                <pre id="assemblerOutput" class="w-full h-32 p-2 border rounded-md bg-gray-50 font-mono text-sm overflow-auto"></pre>
+                <h2 class="text-lg font-semibold mb-2 mt-4">Simulation Output</h2>
+                <pre id="simulatorOutput" class="w-full h-32 p-2 border rounded-md bg-gray-50 font-mono text-sm overflow-auto"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let pyodide;
+        let assemblerOutput = [];
+        let simulatorOutput = [];
+
+        async function loadPyodideAndRun() {
+            pyodide = await loadPyodide();
+            await pyodide.loadPackage("micropip");
+            const micropip = pyodide.pyimport("micropip");
+            await micropip.install("typing_extensions");
+        }
+
+        // Modified assembler.py without file I/O
+        const assemblerCode = `
+from typing import Dict, List, Optional
+
+REGISTER_OPCODES = {
+    "R0": "000", "R1": "001", "R2": "010", "R3": "011",
+    "R4": "100", "R5": "101", "R6": "110", "FLAGS": "111"
+}
+INSTRUCTION_TYPES = {
+    "add": {"type": "A", "opcode": "0000000", "params": 3},
+    "sub": {"type": "A", "opcode": "0000100", "params": 3},
+    "mul": {"type": "A", "opcode": "0011000", "params": 3},
+    "xor": {"type": "A", "opcode": "0101000", "params": 3},
+    "or": {"type": "A", "opcode": "0101100", "params": 3},
+    "and": {"type": "A", "opcode": "0110000", "params": 3},
+    "addf": {"type": "A", "opcode": "1000000", "params": 3},
+    "subf": {"type": "A", "opcode": "1000100", "params": 3},
+    "mov": {"type": "C", "opcode": "0001100000", "params": 2},
+    "movf": {"type": "B", "opcode": "10010", "params": 2},
+    "mov_imm": {"type": "B", "opcode": "000100", "params": 2},
+    "rs": {"type": "B", "opcode": "010000", "params": 2},
+    "ls": {"type": "B", "opcode": "010010", "params": 2},
+    "div": {"type": "C", "opcode": "0011100000", "params": 2},
+    "not": {"type": "C", "opcode": "0110100000", "params": 2},
+    "cmp": {"type": "C", "opcode": "0111000000", "params": 2},
+    "ld": {"type": "D", "opcode": "001000", "params": 2},
+    "st": {"type": "D", "opcode": "001010", "params": 2},
+    "jmp": {"type": "E", "opcode": "011110000", "params": 1},
+    "jlt": {"type": "E", "opcode": "111000000", "params": 1},
+    "jgt": {"type": "E", "opcode": "111010000", "params": 1},
+    "je": {"type": "E", "opcode": "111110000", "params": 1},
+    "hlt": {"type": "F", "opcode": "1101000000000000", "params": 0}
+}
+
+class AssemblerError(Exception):
+    pass
+
+class Assembler:
+    def __init__(self):
+        self.labels: Dict[str, str] = {}
+        self.variables: Dict[str, str] = {}
+        self.instructions: List[str] = []
+        self.line_no: int = 0
+        self.output: List[str] = []
+
+    def binary_to_decimal(self, bin_value: str) -> int:
+        return sum(int(digit) << (len(bin_value) - i - 1) for i, digit in enumerate(bin_value))
+
+    def decimal_to_binary(self, decimal: int, bits: int) -> str:
+        if decimal < 0:
+            raise AssemblerError("Negative numbers not supported")
+        binary = bin(decimal)[2:][::-1]
+        binary = binary + "0" * (bits - len(binary))
+        return binary[::-1][:bits]
+
+    def validate_immediate(self, value: str) -> bool:
+        try:
+            num = int(value[1:]) if value.startswith("$") else int(value)
+            return 0 <= num <= 127
+        except ValueError:
+            return False
+
+    def get_register_opcode(self, reg: str) -> Optional[str]:
+        return REGISTER_OPCODES.get(reg)
+
+    def validate_label(self, label: str) -> bool:
+        return label in self.labels and label not in self.variables
+
+    def validate_variable(self, var: str) -> bool:
+        return var in self.variables
+
+    def process_type_a(self, inst: str, opcode: str, params: int) -> str:
+        parts = inst.split()
+        if len(parts) != params + 1:
+            raise AssemblerError(f"Instruction must have {params} parameters")
+        reg1 = self.get_register_opcode(parts[1])
+        reg2 = self.get_register_opcode(parts[2])
+        reg3 = self.get_register_opcode(parts[3])
+        if not all([reg1, reg2, reg3]):
+            raise AssemblerError("Invalid register name")
+        return opcode + reg1 + reg2 + reg3
+
+    def process_type_b(self, inst: str, opcode: str, params: int) -> str:
+        parts = inst.split()
+        if len(parts) != params + 1:
+            raise AssemblerError(f"Instruction must have {params} parameters")
+        reg = self.get_register_opcode(parts[1])
+        if not reg:
+            raise AssemblerError("Invalid register name")
+        if not self.validate_immediate(parts[2]):
+            raise AssemblerError("Invalid immediate value")
+        imm = self.decimal_to_binary(int(parts[2][1:]), 7)
+        return opcode + reg + imm
+
+    def process_type_b_float(self, inst: str, opcode: str, params: int) -> str:
+        parts = inst.split()
+        if len(parts) != params + 1:
+            raise AssemblerError(f"Instruction must have {params} parameters")
+        reg = self.get_register_opcode(parts[1])
+        if not reg:
+            raise AssemblerError("Invalid register name")
+        try:
+            float_val = float(parts[2][1:])
+            imm = self.reverse_floating_pt(float_val)
+            if not imm:
+                raise AssemblerError("Invalid floating-point value")
+            return opcode + reg + imm
+        except ValueError:
+            raise AssemblerError("Invalid floating-point format")
+
+    def process_type_c(self, inst: str, opcode: str, params: int) -> str:
+        parts = inst.split()
+        if len(parts) != params + 1:
+            raise AssemblerError(f"Instruction must have {params} parameters")
+        reg1 = self.get_register_opcode(parts[1])
+        reg2 = self.get_register_opcode(parts[2])
+        if not all([reg1, reg2]):
+            raise AssemblerError("Invalid register name")
+        return opcode + reg1 + reg2
+
+    def process_type_d(self, inst: str, opcode: str, params: int) -> str:
+        parts = inst.split()
+        if len(parts) != params + 1:
+            raise AssemblerError(f"Instruction must have {params} parameters")
+        reg = self.get_register_opcode(parts[1])
+        if not reg:
+            raise AssemblerError("Invalid register name")
+        if not self.validate_variable(parts[2]):
+            raise AssemblerError("Undefined variable")
+        return opcode + reg + self.variables[parts[2]]
+
+    def process_type_e(self, inst: str, opcode: str, params: int) -> str:
+        parts = inst.split()
+        if len(parts) != params + 1:
+            raise AssemblerError(f"Instruction must have {params} parameters")
+        label = parts[1]
+        if not self.validate_label(label):
+            raise AssemblerError("Undefined label or variable used as label")
+        return opcode + self.labels[label]
+
+    def floating_pt(self, binary: str) -> float:
+        exponent = binary[:3]
+        mantissa = binary[3:]
+        if exponent == "000":
+            num = sum(int(mantissa[i]) * (2 ** (-i-1)) for i in range(5))
+            return num * (2 ** -2)
+        elif exponent != "111":
+            num = 1 + sum(int(mantissa[i]) * (2 ** (-i-1)) for i in range(5))
+            return num * (2 ** (self.binary_to_decimal(exponent) - 3))
+        return 0.0
+
+    def reverse_floating_pt(self, value: float) -> Optional[str]:
+        candidates = {}
+        for i in range(256):
+            binary = self.decimal_to_binary(i, 8)
+            if binary.startswith("111"):
+                continue
+            float_val = self.floating_pt(binary)
+            candidates[binary] = float_val
+        for binary, float_val in candidates.items():
+            if abs(float_val - value) < 1e-10:
+                return binary
+        return None
+
+    def process_instruction(self, inst: str) -> None:
+        self.line_no += 1
+        inst = inst.strip()
+        if not inst:
+            return
+        label = None
+        if ":" in inst:
+            label, inst = inst.split(":", 1)
+            inst = inst.strip()
+            if not inst:
+                return
+        parts = inst.split()
+        if not parts:
+            raise AssemblerError("Empty instruction")
+        opcode = parts[0]
+        if opcode == "var":
+            if len(parts) != 2:
+                raise AssemblerError("Invalid variable declaration")
+            if self.instructions:
+                raise AssemblerError("Variables must be declared at the beginning")
+            self.variables[parts[1]] = "0" * 7
+            return
+        if opcode not in INSTRUCTION_TYPES:
+            raise AssemblerError("Invalid instruction")
+        inst_info = INSTRUCTION_TYPES[opcode]
+        inst_type = inst_info["type"]
+        inst_opcode = inst_info["opcode"]
+        expected_params = inst_info["params"]
+        try:
+            if inst_type == "A":
+                result = self.process_type_a(inst, inst_opcode, expected_params)
+            elif inst_type == "B":
+                if opcode == "movf":
+                    result = self.process_type_b_float(inst, inst_opcode, expected_params)
+                else:
+                    result = self.process_type_b(inst, inst_opcode, expected_params)
+            elif inst_type == "C":
+                result = self.process_type_c(inst, inst_opcode, expected_params)
+            elif inst_type == "D":
+                result = self.process_type_d(inst, inst_opcode, expected_params)
+            elif inst_type == "E":
+                result = self.process_type_e(inst, inst_opcode, expected_params)
+            elif inst_type == "F":
+                result = inst_opcode
+            else:
+                raise AssemblerError("Unknown instruction type")
+            self.output.append(result)
+        except AssemblerError as e:
+            self.output.append(f"Error in line {self.line_no}: {str(e)}")
+            raise
+
+    def run(self, input_text: str) -> List[str]:
+        lines = input_text.strip().split("\\n")
+        address = 0
+        for line in lines:
+            if not line:
+                continue
+            if ":" in line:
+                label = line.split(":")[0].strip()
+                self.labels[label] = self.decimal_to_binary(address, 7)
+                if line.split(":")[1].strip():
+                    address += 1
+            elif line.startswith("var"):
+                continue
+            else:
+                self.instructions.append(line)
+                address += 1
+        for line in lines:
+            if line.startswith("var"):
+                var_name = line.split()[1]
+                self.variables[var_name] = self.decimal_to_binary(address, 7)
+                address += 1
+        if not lines or not lines[-1].strip().endswith("hlt"):
+            self.output.append("Error: Program must end with hlt instruction")
+            return self.output
+        for line in lines:
+            self.process_instruction(line)
+        return self.output
+`;
+
+        // Modified simulator.py without file I/O
+        const simulatorCode = `
+from typing import Dict, List, Callable, Optional
+
+MEMORY_SIZE = 128
+REGISTER_COUNT = 8
+WORD_SIZE = 16
+FLOAT_PRECISION = 8
+INSTRUCTION_TYPES = {
+    "00000": {"name": "add", "type": "A", "func": "addition"},
+    "00001": {"name": "sub", "type": "A", "func": "subtraction"},
+    "00010": {"name": "mov_imm", "type": "B", "func": "move_immediate"},
+    "00011": {"name": "mov_reg", "type": "C", "func": "move_register"},
+    "00100": {"name": "ld", "type": "D", "func": "load"},
+    "00101": {"name": "st", "type": "D", "func": "store"},
+    "00110": {"name": "mul", "type": "A", "func": "multiply"},
+    "00111": {"name": "div", "type": "C", "func": "division"},
+    "01000": {"name": "rs", "type": "B", "func": "right_shift"},
+    "01001": {"name": "ls", "type": "B", "func": "left_shift"},
+    "01010": {"name": "xor", "type": "A", "func": "xor"},
+    "01011": {"name": "or", "type": "A", "func": "or_operation"},
+    "01100": {"name": "and", "type": "A", "func": "and_operation"},
+    "01101": {"name": "not", "type": "C", "func": "invert"},
+    "01110": {"name": "cmp", "type": "C", "func": "compare"},
+    "01111": {"name": "jmp", "type": "E", "func": "unconditional_jump"},
+    "11100": {"name": "jlt", "type": "E", "func": "jump_if_lt"},
+    "11101": {"name": "jgt", "type": "E", "func": "jump_if_gt"},
+    "11111": {"name": "je", "type": "E", "func": "jump_if_eq"},
+    "11010": {"name": "hlt", "type": "F", "func": "halt"},
+    "10000": {"name": "addf", "type": "A", "func": "f_addition"},
+    "10001": {"name": "subf", "type": "A", "func": "f_subtraction"},
+    "10010": {"name": "movf", "type": "B", "func": "movf_immediate"}
+}
+
+class SimulatorError(Exception):
+    pass
+
+class Simulator:
+    def __init__(self):
+        self.pc: int = 0
+        self.halted: bool = False
+        self.memory: List[str] = ["0" * WORD_SIZE] * MEMORY_SIZE
+        self.registers: List[float] = [0.0] * REGISTER_COUNT
+        self.output: List[str] = []
+
+    def binary_to_decimal(self, bin_value: str) -> int:
+        return sum(int(digit) << (len(bin_value) - i - 1) for i, digit in enumerate(bin_value))
+
+    def decimal_to_binary(self, decimal: int, bits: int) -> str:
+        if decimal < 0:
+            raise SimulatorError("Negative numbers not supported")
+        binary = bin(decimal)[2:][::-1]
+        binary = binary + "0" * (bits - len(binary))
+        return binary[::-1][:bits]
+
+    def floating_pt(self, binary: str) -> float:
+        exponent = binary[:3]
+        mantissa = binary[3:]
+        if exponent == "000":
+            num = sum(int(mantissa[i]) * (2 ** (-i-1)) for i in range(5))
+            return num * (2 ** -2)
+        elif exponent != "111":
+            num = 1 + sum(int(mantissa[i]) * (2 ** (-i-1)) for i in range(5))
+            return num * (2 ** (self.binary_to_decimal(exponent) - 3))
+        return 0.0
+
+    def reverse_floating_pt(self, value: float) -> str:
+        candidates = {}
+        for i in range(256):
+            binary = self.decimal_to_binary(i, FLOAT_PRECISION)
+            if binary.startswith("111"):
+                continue
+            float_val = self.floating_pt(binary)
+            candidates[binary] = float_val
+        for binary, float_val in candidates.items():
+            if abs(float_val - value) < 1e-10:
+                return binary
+        return "0" * FLOAT_PRECISION
+
+    def increment_pc(self) -> None:
+        self.pc += 1
+
+    def addition(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[7:10])
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        result = self.registers[src1] + self.registers[src2]
+        if result < 2 ** WORD_SIZE:
+            self.registers[dest] = result
+            self.registers[7] = 0
+        else:
+            self.registers[dest] = result % (2 ** WORD_SIZE)
+            self.registers[7] = 8
+        self.increment_pc()
+
+    def subtraction(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[7:10])
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        result = self.registers[src1] - self.registers[src2]
+        if result >= 0:
+            self.registers[dest] = result
+            self.registers[7] = 0
+        else:
+            self.registers[dest] = 0
+            self.registers[7] = 8
+        self.increment_pc()
+
+    def move_immediate(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[6:9])
+        value = self.binary_to_decimal(inst[9:])
+        self.registers[dest] = float(value)
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def move_register(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[10:13])
+        src = self.binary_to_decimal(inst[13:])
+        self.registers[dest] = self.registers[src]
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def load(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[6:9])
+        addr = self.binary_to_decimal(inst[9:])
+        self.registers[dest] = float(self.binary_to_decimal(self.memory[addr]))
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def store(self, inst: str) -> None:
+        src = self.binary_to_decimal(inst[6:9])
+        addr = self.binary_to_decimal(inst[9:])
+        self.memory[addr] = self.decimal_to_binary(int(self.registers[src]), WORD_SIZE)
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def multiply(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[7:10])
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        result = self.registers[src1] * self.registers[src2]
+        if result < 2 ** WORD_SIZE:
+            self.registers[dest] = result
+            self.registers[7] = 0
+        else:
+            self.registers[dest] = result % (2 ** WORD_SIZE)
+            self.registers[7] = 8
+        self.increment_pc()
+
+    def division(self, inst: str) -> None:
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        if self.registers[src2] == 0:
+            self.registers[0] = 0
+            self.registers[1] = 0
+            self.registers[7] = 8
+        else:
+            self.registers[0] = self.registers[src1] // self.registers[src2]
+            self.registers[1] = self.registers[src1] % self.registers[src2]
+            self.registers[7] = 0
+        self.increment_pc()
+
+    def right_shift(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[6:9])
+        shift = self.binary_to_decimal(inst[9:])
+        self.registers[dest] = float(int(self.registers[dest]) >> shift)
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def left_shift(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[6:9])
+        shift = self.binary_to_decimal(inst[9:])
+        self.registers[dest] = float(int(self.registers[dest]) << shift)
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def xor(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[7:10])
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        self.registers[dest] = float(int(self.registers[src1]) ^ int(self.registers[src2]))
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def or_operation(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[7:10])
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        self.registers[dest] = float(int(self.registers[src1]) | int(self.registers[src2]))
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def and_operation(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[7:10])
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        self.registers[dest] = float(int(self.registers[src1]) & int(self.registers[src2]))
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def invert(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[10:13])
+        src = self.binary_to_decimal(inst[13:])
+        self.registers[dest] = float(65535 - int(self.registers[src]))
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def compare(self, inst: str) -> None:
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        if self.registers[src1] == self.registers[src2]:
+            self.registers[7] = 1
+        elif self.registers[src1] < self.registers[src2]:
+            self.registers[7] = 4
+        else:
+            self.registers[7] = 2
+        self.increment_pc()
+
+    def unconditional_jump(self, inst: str) -> None:
+        self.pc = self.binary_to_decimal(inst[9:])
+        self.registers[7] = 0
+
+    def jump_if_lt(self, inst: str) -> None:
+        if self.registers[7] == 4:
+            self.pc = self.binary_to_decimal(inst[9:])
+        else:
+            self.increment_pc()
+        self.registers[7] = 0
+
+    def jump_if_gt(self, inst: str) -> None:
+        if self.registers[7] == 2:
+            self.pc = self.binary_to_decimal(inst[9:])
+        else:
+            self.increment_pc()
+        self.registers[7] = 0
+
+    def jump_if_eq(self, inst: str) -> None:
+        if self.registers[7] == 1:
+            self.pc = self.binary_to_decimal(inst[9:])
+        else:
+            self.increment_pc()
+        self.registers[7] = 0
+
+    def halt(self, inst: str) -> None:
+        self.halted = True
+
+    def f_addition(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[7:10])
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        x = self.floating_pt(self.decimal_to_binary(int(self.registers[src1]), 8))
+        y = self.floating_pt(self.decimal_to_binary(int(self.registers[src2]), 8))
+        result = x + y
+        if result < 15.75:
+            self.registers[dest] = result
+            self.registers[7] = 0
+        else:
+            self.registers[dest] = 0
+            self.registers[7] = 8
+        self.increment_pc()
+
+    def f_subtraction(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[7:10])
+        src1 = self.binary_to_decimal(inst[10:13])
+        src2 = self.binary_to_decimal(inst[13:])
+        x = self.floating_pt(self.decimal_to_binary(int(self.registers[src1]), 8))
+        y = self.floating_pt(self.decimal_to_binary(int(self.registers[src2]), 8))
+        result = x - y
+        if result > 0:
+            self.registers[dest] = result
+            self.registers[7] = 0
+        else:
+            self.registers[dest] = 0
+            self.registers[7] = 8
+        self.increment_pc()
+
+    def movf_immediate(self, inst: str) -> None:
+        dest = self.binary_to_decimal(inst[5:8])
+        value = self.floating_pt(inst[8:])
+        self.registers[dest] = value
+        self.registers[7] = 0
+        self.increment_pc()
+
+    def load_program(self, instructions: List[str]) -> None:
+        for i, line in enumerate(instructions):
+            if i < MEMORY_SIZE and line:
+                self.memory[i] = line.zfill(WORD_SIZE)
+
+    def run(self, instructions: List[str]) -> List[str]:
+        self.load_program(instructions)
+        instruction_map: Dict[str, Callable[[str], None]] = {
+            opcode: getattr(self, info["func"])
+            for opcode, info in INSTRUCTION_TYPES.items()
+        }
+        while not self.halted:
+            if self.pc >= MEMORY_SIZE:
+                self.output.append("Error: Program counter out of bounds")
+                break
+            inst = self.memory[self.pc]
+            opcode = inst[:5]
+            if opcode not in instruction_map:
+                self.output.append(f"Error: Invalid opcode at PC {self.pc}")
+                break
+            instruction_map[opcode](inst)
+            output = f"{self.decimal_to_binary(self.pc, 7)}        "
+            for reg in self.registers:
+                binary = self.reverse_floating_pt(reg)
+                output += f"00000000{binary} "
+            self.output.append(output.strip())
+        for mem_val in self.memory:
+            if mem_val != "0" * WORD_SIZE:
+                self.output.append(mem_val)
+        return self.output
+`;
+
+        async function runAssembler() {
+            const input = document.getElementById("assemblyInput").value;
+            if (!input.trim()) {
+                document.getElementById("assemblerOutput").textContent = "Please enter assembly code.";
+                return;
+            }
+
+            try {
+                await pyodide.runPythonAsync(`
+${assemblerCode}
+assembler = Assembler()
+try:
+    result = assembler.run('''${input}''')
+    print("\\n".join(result))
+except Exception as e:
+    print(str(e))
+                `);
+                assemblerOutput = pyodide.globals.get("sys").stdout.getvalue().split("\n");
+                document.getElementById("assemblerOutput").textContent = assemblerOutput.join("\n");
+                document.getElementById("simulatorOutput").textContent = "";
+            } catch (e) {
+                document.getElementById("assemblerOutput").textContent = `Error: ${e.message}`;
+            }
+        }
+
+        async function runSimulator() {
+            if (!assemblerOutput.length || assemblerOutput.some(line => line.startsWith("Error"))) {
+                document.getElementById("simulatorOutput").textContent = "Please assemble valid code first.";
+                return;
+            }
+
+            try {
+                await pyodide.runPythonAsync(`
+${simulatorCode}
+simulator = Simulator()
+try:
+    result = simulator.run(${JSON.stringify(assemblerOutput.filter(line => !line.startsWith("Error")))})
+    print("\\n".join(result))
+except Exception as e:
+    print(str(e))
+                `);
+                simulatorOutput = pyodide.globals.get("sys").stdout.getvalue().split("\n");
+                document.getElementById("simulatorOutput").textContent = simulatorOutput.join("\n");
+            } catch (e) {
+                document.getElementById("simulatorOutput").textContent = `Error: ${e.message}`;
+            }
+        }
+
+        loadPyodideAndRun();
+    </script>
+</body>
+</html>
