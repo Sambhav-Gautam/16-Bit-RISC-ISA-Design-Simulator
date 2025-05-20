@@ -160,33 +160,33 @@ from typing import Dict, List, Optional
 import re
 
 REGISTER_OPCODES = {
-    "R0": "000", "R1": "001", "R2": "010 HANDLER MOVED TO LINE 500
+    "R0": "000", "R1": "001", "R2": "010", "R3": "011",
     "R4": "100", "R5": "101", "R6": "110", "FLAGS": "111"
 }
 INSTRUCTION_TYPES = {
-    "add": {"type": "A", "opcode": "0000000", "params": 3},
-    "sub": {"type": "A", "opcode": "0000100", "params": 3},
-    "mul": {"type": "A", "opcode": "0011000", "params": 3},
-    "xor": {"type": "A", "opcode": "0101000", "params": 3},
-    "or": {"type": "A", "opcode": "0101100", "params": 3},
-    "and": {"type": "A", "opcode": "0110000", "params": 3},
-    "addf": {"type": "A", "opcode": "1000000", "params": 3},
-    "subf": {"type": "A", "opcode": "1000100", "params": 3},
-    "mov": {"type": "C", "opcode": "0001100000", "params": 2},
+    "add": {"type": "A", "opcode": "00000", "params": 3},
+    "sub": {"type": "A", "opcode": "00001", "params": 3},
+    "mul": {"type": "A", "opcode": "00110", "params": 3},
+    "xor": {"type": "A", "opcode": "01010", "params": 3},
+    "or": {"type": "A", "opcode": "01011", "params": 3},
+    "and": {"type": "A", "opcode": "01100", "params": 3},
+    "addf": {"type": "A", "opcode": "10000", "params": 3},
+    "subf": {"type": "A", "opcode": "10001", "params": 3},
+    "mov": {"type": "C", "opcode": "00011", "params": 2},
     "movf": {"type": "B", "opcode": "10010", "params": 2},
-    "mov_imm": {"type": "B", "opcode": "000100", "params": 2},
-    "rs": {"type": "B", "opcode": "010000", "params": 2},
-    "ls": {"type": "B", "opcode": "010010", "params": 2},
-    "div": {"type": "C", "opcode": "0011100000", "params": 2},
-    "not": {"type": "C", "opcode": "0110100000", "params": 2},
-    "cmp": {"type": "C", "opcode": "0111000000", "params": 2},
-    "ld": {"type": "D", "opcode": "001000", "params": 2},
-    "st": {"type": "D", "opcode": "001010", "params": 2},
-    "jmp": {"type": "E", "opcode": "011110000", "params": 1},
-    "jlt": {"type": "E", "opcode": "111000000", "params": 1},
-    "jgt": {"type": "E", "opcode": "111010000", "params": 1},
-    "je": {"type": "E", "opcode": "111110000", "params": 1},
-    "hlt": {"type": "F", "opcode": "1101000000000000", "params": 0}
+    "mov_imm": {"type": "B", "opcode": "00010", "params": 2},
+    "rs": {"type": "B", "opcode": "01000", "params": 2},
+    "ls": {"type": "B", "opcode": "01001", "params": 2},
+    "div": {"type": "C", "opcode": "00111", "params": 2},
+    "not": {"type": "C", "opcode": "01101", "params": 2},
+    "cmp": {"type": "C", "opcode": "01110", "params": 2},
+    "ld": {"type": "D", "opcode": "00100", "params": 2},
+    "st": {"type": "D", "opcode": "00101", "params": 2},
+    "jmp": {"type": "E", "opcode": "01111", "params": 1},
+    "jlt": {"type": "E", "opcode": "11100", "params": 1},
+    "jgt": {"type": "E", "opcode": "11101", "params": 1},
+    "je": {"type": "E", "opcode": "11111", "params": 1},
+    "hlt": {"type": "F", "opcode": "11010", "params": 0}
 }
 
 class AssemblerError(Exception):
@@ -206,9 +206,8 @@ class Assembler:
     def decimal_to_binary(self, decimal: int, bits: int) -> str:
         if decimal < 0:
             raise AssemblerError("Negative numbers not supported")
-        binary = bin(decimal)[2:][::-1]
-        binary = binary + "0" * (bits - len(binary))
-        return binary[::-1][:bits]
+        binary = bin(decimal)[2:].zfill(bits)
+        return binary[:bits]
 
     def validate_immediate(self, value: str) -> bool:
         try:
@@ -221,7 +220,7 @@ class Assembler:
         reg = reg.upper()
         opcode = REGISTER_OPCODES.get(reg)
         if not opcode:
-            print(f"Debug: Invalid register '{reg}' at line {line_no}")
+            raise AssemblerError(f"Invalid register '{reg}' at line {line_no}")
         return opcode
 
     def validate_label(self, label: str) -> bool:
@@ -237,17 +236,13 @@ class Assembler:
         reg1 = self.get_register_opcode(parts[1], line_no)
         reg2 = self.get_register_opcode(parts[2], line_no)
         reg3 = self.get_register_opcode(parts[3], line_no)
-        if not all([reg1, reg2, reg3]):
-            raise AssemblerError(f"Invalid register name in '{inst}' at line {line_no}")
-        return opcode + reg1 + reg2 + reg3
+        return opcode + "00" + reg1 + reg2 + reg3
 
     def process_type_b(self, inst: str, opcode: str, params: int, line_no: int) -> str:
         parts = re.split(r'\\s+', inst.strip(), maxsplit=2)
         if len(parts) != params + 1:
             raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
         reg = self.get_register_opcode(parts[1], line_no)
-        if not reg:
-            raise AssemblerError(f"Invalid register name '{parts[1]}' in '{inst}' at line {line_no}")
         if not self.validate_immediate(parts[2]):
             raise AssemblerError(f"Invalid immediate value '{parts[2]}' at line {line_no}")
         imm = self.decimal_to_binary(int(parts[2][1:]), 7)
@@ -258,8 +253,6 @@ class Assembler:
         if len(parts) != params + 1:
             raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
         reg = self.get_register_opcode(parts[1], line_no)
-        if not reg:
-            raise AssemblerError(f"Invalid register name '{parts[1]}' in '{inst}' at line {line_no}")
         try:
             float_val = float(parts[2][1:])
             imm = self.reverse_floating_pt(float_val)
@@ -275,17 +268,13 @@ class Assembler:
             raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
         reg1 = self.get_register_opcode(parts[1], line_no)
         reg2 = self.get_register_opcode(parts[2], line_no)
-        if not all([reg1, reg2]):
-            raise AssemblerError(f"Invalid register name in '{inst}' at line {line_no}")
-        return opcode + reg1 + reg2
+        return opcode + "00000" + reg1 + reg2
 
     def process_type_d(self, inst: str, opcode: str, params: int, line_no: int) -> str:
         parts = re.split(r'\\s+', inst.strip(), maxsplit=2)
         if len(parts) != params + 1:
             raise AssemblerError(f"Instruction must have {params} parameters at line {line_no}")
         reg = self.get_register_opcode(parts[1], line_no)
-        if not reg:
-            raise AssemblerError(f"Invalid register name '{parts[1]}' in '{inst}' at line {line_no}")
         if not self.validate_variable(parts[2]):
             raise AssemblerError(f"Undefined variable '{parts[2]}' in '{inst}' at line {line_no}")
         return opcode + reg + self.variables[parts[2]]
@@ -297,7 +286,7 @@ class Assembler:
         label = parts[1]
         if not self.validate_label(label):
             raise AssemblerError(f"Undefined label or variable used as label '{label}' at line {line_no}")
-        return opcode + self.labels[label]
+        return opcode + "000" + self.labels[label]
 
     def floating_pt(self, binary: str) -> float:
         exponent = binary[:3]
@@ -327,7 +316,6 @@ class Assembler:
         inst = inst.strip()
         if not inst:
             return
-        print(f"Debug: Processing line {line_no}: '{inst}'")
         label = None
         if ":" in inst:
             label, inst = inst.split(":", 1)
@@ -336,7 +324,6 @@ class Assembler:
                 return
         inst = re.sub(r'\\s+', ' ', inst)
         parts = inst.split(maxsplit=3)
-        print(f"Debug: Parsed parts: {parts}")
         if not parts:
             raise AssemblerError(f"Empty instruction at line {line_no}")
         opcode = parts[0]
@@ -346,7 +333,6 @@ class Assembler:
             return
         if opcode == "mov" and len(parts) > 2 and parts[2].startswith("$"):
             opcode = "mov_imm"
-            print(f"Debug: Treating 'mov {parts[1]} {parts[2]}' as mov_imm (Type B)")
         if opcode not in INSTRUCTION_TYPES:
             raise AssemblerError(f"Invalid instruction '{opcode}' at line {line_no}")
         inst_info = INSTRUCTION_TYPES[opcode]
@@ -368,7 +354,7 @@ class Assembler:
             elif inst_type == "E":
                 result = self.process_type_e(inst, inst_opcode, expected_params, line_no)
             elif inst_type == "F":
-                result = inst_opcode
+                result = inst_opcode + "00000000000"
             else:
                 raise AssemblerError(f"Unknown instruction type '{inst_type}' at line {line_no}")
             self.output.append(result)
@@ -378,7 +364,6 @@ class Assembler:
 
     def run(self, input_text: str) -> List[str]:
         input_text = input_text.replace('\\r', '').replace('\\t', ' ')
-        print(f"Debug: Cleaned input: {repr(input_text)}")
         lines = input_text.strip().split("\\n")
         seen_non_var = False
         for line in lines:
@@ -400,7 +385,7 @@ class Assembler:
             if not line:
                 continue
             if ":" in line:
-                label = line.split(":")[0].strip()
+                label = line.split(":")[0].strip六
                 self.labels[label] = self.decimal_to_binary(address, 7)
                 if line.split(":")[1].strip():
                     address += 1
@@ -428,7 +413,7 @@ class Assembler:
         return self.output
 `;
 
-        // Simulator Code (unchanged)
+        // Simulator Code
         const simulatorCode = `
 from typing import Dict, List, Callable, Optional
 
@@ -479,9 +464,8 @@ class Simulator:
     def decimal_to_binary(self, decimal: int, bits: int) -> str:
         if decimal < 0:
             raise SimulatorError("Negative numbers not supported")
-        binary = bin(decimal)[2:][::-1]
-        binary = binary + "0" * (bits - len(binary))
-        return binary[::-1][:bits]
+        binary = bin(decimal)[2:].zfill(bits)
+        return binary[:bits]
 
     def floating_pt(self, binary: str) -> float:
         exponent = binary[:3]
@@ -537,8 +521,8 @@ class Simulator:
         self.increment_pc()
 
     def move_immediate(self, inst: str) -> None:
-        dest = self.binary_to_decimal(inst[6:9])
-        value = self.binary_to_decimal(inst[9:])
+        dest = self.binary_to_decimal(inst[5:8])
+        value = self.binary_to_decimal(inst[8:])
         self.registers[dest] = float(value)
         self.registers[7] = 0
         self.increment_pc()
@@ -551,15 +535,15 @@ class Simulator:
         self.increment_pc()
 
     def load(self, inst: str) -> None:
-        dest = self.binary_to_decimal(inst[6:9])
-        addr = self.binary_to_decimal(inst[9:])
+        dest = self.binary_to_decimal(inst[5:8])
+        addr = self.binary_to_decimal(inst[8:])
         self.registers[dest] = float(self.binary_to_decimal(self.memory[addr]))
         self.registers[7] = 0
         self.increment_pc()
 
     def store(self, inst: str) -> None:
-        src = self.binary_to_decimal(inst[6:9])
-        addr = self.binary_to_decimal(inst[9:])
+        src = self.binary_to_decimal(inst[5:8])
+        addr = self.binary_to_decimal(inst[8:])
         self.memory[addr] = self.decimal_to_binary(int(self.registers[src]), WORD_SIZE)
         self.registers[7] = 0
         self.increment_pc()
@@ -591,15 +575,15 @@ class Simulator:
         self.increment_pc()
 
     def right_shift(self, inst: str) -> None:
-        dest = self.binary_to_decimal(inst[6:9])
-        shift = self.binary_to_decimal(inst[9:])
+        dest = self.binary_to_decimal(inst[5:8])
+        shift = self.binary_to_decimal(inst[8:])
         self.registers[dest] = float(int(self.registers[dest]) >> shift)
         self.registers[7] = 0
         self.increment_pc()
 
     def left_shift(self, inst: str) -> None:
-        dest = self.binary_to_decimal(inst[6:9])
-        shift = self.binary_to_decimal(inst[9:])
+        dest = self.binary_to_decimal(inst[5:8])
+        shift = self.binary_to_decimal(inst[8:])
         self.registers[dest] = float(int(self.registers[dest]) << shift)
         self.registers[7] = 0
         self.increment_pc()
@@ -729,13 +713,15 @@ class Simulator:
             inst = self.memory[self.pc]
             opcode = inst[:5]
             if opcode not in instruction_map:
-                self.output.append(f"Error: Invalid opcode at PC {self.pc}")
+                self.output.append(f"Error: Invalid opcode {opcode} at PC {self.pc}")
                 break
             instruction_map[opcode](inst)
             output = f"{self.decimal_to_binary(self.pc, 7)}        "
             for reg in self.registers:
-                binary = self.reverse_floating_pt(reg)
-                output += f"00000000{binary} "
+                if reg.is_integer():
+                    output += f"{self.decimal_to_binary(int(reg), 16)} "
+                else:
+                    output += f"{self.reverse_floating_pt(reg)} "
             self.output.append(output.strip())
         for mem_val in self.memory:
             if mem_val != "0" * WORD_SIZE:
@@ -755,7 +741,6 @@ class Simulator:
                 document.getElementById("assemblerOutput").textContent = "Pyodide is not yet initialized. Please wait a moment and try again.";
                 return;
             }
-            console.log("Assembling raw input:", JSON.stringify(input));
             assembleSpinner.style.display = "inline-block";
             assembleText.textContent = "Assembling...";
             try {
@@ -775,8 +760,7 @@ except Exception as e:
     print(str(e))
                 `);
                 const stdout = pyodide.runPython(`sys.stdout.getvalue()`);
-                console.log("Python debug output:", stdout);
-                assemblerOutput = stdout ? stdout.split("\\n").filter(line => !line.startsWith("Debug:")) : [];
+                assemblerOutput = stdout ? stdout.split("\\n") : [];
                 document.getElementById("assemblerOutput").textContent = assemblerOutput.join("\\n");
                 document.getElementById("simulatorOutput").textContent = "";
             } catch (e) {
